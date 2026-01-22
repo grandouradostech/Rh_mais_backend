@@ -1,9 +1,9 @@
 const supabase = require('../config/supabase');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs'); // <--- IMPORTANTE
+const bcrypt = require('bcryptjs');
 
 exports.login = async (req, res) => {
-    console.log('--- Login Seguro (Bcrypt) ---');
+    console.log('--- Login Seguro com Verificação de Status (QLP) ---');
     
     const { cpf, senha } = req.body;
 
@@ -13,8 +13,6 @@ exports.login = async (req, res) => {
 
     try {
         const cpfLimpo = String(cpf).replace(/\D/g, ''); 
-
-        // 1. Busca o usuário pelo CPF
         let { data: usuario, error } = await supabase
             .from('usuarios_sistema') 
             .select('*')
@@ -25,18 +23,38 @@ exports.login = async (req, res) => {
             return res.status(401).json({ error: 'Usuário não encontrado.' });
         }
 
-        // 2. A MÁGICA ACONTECE AQUI: Comparação de Hash
-        const senhaBanco = usuario.senha || ''; // O Hash que está no banco
-        
-        // O bcrypt compara a senha digitada (texto) com o hash do banco
+        const senhaBanco = usuario.senha || '';
         const senhaConfere = await bcrypt.compare(String(senha), senhaBanco);
 
         if (!senhaConfere) {
-            console.warn('Senha inválida (Hash não bateu).');
+            console.warn('Senha inválida.');
             return res.status(401).json({ error: 'Senha incorreta.' });
         }
+        if (usuario.perfil !== 'admin') {
+            
+            const { data: dadosRH, error: erroRH } = await supabase
+                .from('QLP')
+                .select('CLASSIFICACAO, SITUACAO')
+                .eq('CPF', cpfLimpo) 
+                .maybeSingle(); 
 
-        // 3. Sucesso: Gera o Token
+            if (dadosRH) {
+                const classificacao = (dadosRH.CLASSIFICACAO || '').toUpperCase().trim();
+                const situacao = (dadosRH.SITUACAO || '').toUpperCase().trim();
+
+                console.log(`[Login Check] CPF: ${cpfLimpo} | Classificação: ${classificacao} | Situação: ${situacao}`);
+
+                if (classificacao === 'RECUPERAR' || classificacao.includes('DESLIGAR')) {
+                    return res.status(403).json({ error: 'Acesso negado. Consulte seu gestor (Status: Recuperação/Bloqueado).' });
+                }
+
+                if (situacao.includes('DESLIGADO') || situacao.includes('AFASTADO')) {
+                    return res.status(403).json({ error: 'Acesso não permitido para colaboradores desligados ou afastados.' });
+                }
+            } else {
+                console.warn("Usuário logou, mas não foi encontrado na tabela QLP.");
+            }
+        }
         const perfil = usuario.perfil || 'user';
         const token = jwt.sign(
             { id: usuario.cpf, role: perfil },
@@ -47,7 +65,7 @@ exports.login = async (req, res) => {
         return res.json({
             sucesso: true,
             usuario: {
-                nome: usuario.nome || "Colaborador", // Tente adicionar coluna 'nome' no usuarios_sistema depois
+                nome: usuario.nome || "Colaborador",
                 role: perfil,
                 id: usuario.cpf,
                 foto: usuario.foto

@@ -1,5 +1,5 @@
 const supabase = require('../config/supabase');
-const fixText = require('../utils/textFixer'); // <--- Importa o nosso corretor
+const fixText = require('../utils/textFixer'); // Importa o nosso corretor
 
 // Função auxiliar para pegar valor com segurança e aplicar a correção
 const safeGet = (obj, key) => {
@@ -8,10 +8,9 @@ const safeGet = (obj, key) => {
     // Tenta pegar a chave exata ou minúscula
     let valor = obj[key] !== undefined ? obj[key] : (obj[key.toLowerCase()] !== undefined ? obj[key.toLowerCase()] : null);
 
-    // Se o valor for texto, aplica a CORREÇÃO
     if (typeof valor === 'string') {
         valor = valor.trim(); 
-        valor = fixText(valor); // <--- Chama o script de limpeza aqui!
+        valor = fixText(valor); // Chama o script de limpeza aqui!
     }
     
     return valor;
@@ -19,22 +18,30 @@ const safeGet = (obj, key) => {
 
 exports.listar = async (req, res) => {
     try {
-        const { data, error } = await supabase
-            .from('QLP')
-            .select('*');
+        console.log(`[Listar] Usuário: ${req.userName} | Perfil: ${req.userRole}`);
+        let query = supabase.from('QLP').select('*');
+        if (req.userRole === 'admin') {
+            console.log('-> Acesso ADMIN: Visualização completa.');
+        } 
+        else if (req.userRole === 'gestor') {
+            console.log(`-> Acesso GESTOR: Filtrando liderados de "${req.userName}"`);
+            query = query.ilike('LIDER', `%${req.userName}%`);
+        } 
+        else {
+            console.log(`-> Acesso FUNCIONÁRIO: Restrito ao CPF ${req.userId}`);
+            query = query.eq('CPF', req.userId);
+        }
+        const { data, error } = await query;
 
         if (error) throw error;
-
-        // Se não vier nada
-        if (!data) return res.json({ sucesso: true, dados: [] });
+        if (!data || data.length === 0) {
+            return res.json({ sucesso: true, dados: [] });
+        }
 
         const colaboradoresFormatados = data.map(colab => {
-            // Montagem do Ciclo de Gente (PDI)
             const pdi = [];
             for (let i = 1; i <= 7; i++) {
-                // O safeGet já corrige o texto automaticamente
                 const comp = safeGet(colab, `COMPETENCIA_${i}`);
-                
                 if (comp) { 
                     pdi.push({
                         competencia: comp,
@@ -72,14 +79,12 @@ exports.listar = async (req, res) => {
             };
         });
 
-        // Ordenação manual para não depender do banco
         colaboradoresFormatados.sort((a, b) => {
             if(!a.nome) return 1;
             if(!b.nome) return -1;
             return a.nome.localeCompare(b.nome);
         });
 
-        // Força UTF-8 no cabeçalho HTTP
         res.header("Content-Type", "application/json; charset=utf-8");
         
         return res.json({

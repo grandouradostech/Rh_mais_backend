@@ -1,5 +1,7 @@
 const jwt = require('jsonwebtoken');
 
+const normalizeRole = (value) => String(value || '').trim().toLowerCase();
+
 module.exports = (req, res, next) => {
     // 1. Busca o token no Header
     const authHeader = req.headers.authorization;
@@ -23,7 +25,7 @@ module.exports = (req, res, next) => {
 
         // 3. Injeta dados de segurança na requisição
         req.userId = decoded.id;     // CPF
-        req.userRole = decoded.role; // admin, gestor, funcionario
+        req.userRole = normalizeRole(decoded.role); // admin, gestor, funcionario
         req.userName = decoded.nome; // Nome (usado para filtrar LIDER)
 
         return next();
